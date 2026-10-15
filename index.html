@@ -690,6 +690,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   color-scheme:dark;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{height:100%;margin:0;background:var(--map);color:var(--fg);font-family:var(--font-body);font-size:15px;overflow:hidden;-webkit-tap-highlight-color:transparent}
 button{font:inherit;color:inherit;cursor:pointer}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -1199,7 +1200,7 @@ $('go').onclick=()=>{
   if(!('geolocation' in navigator)){ $('startErr').textContent='Bu tarayıcı konumu desteklemiyor.'; $('startErr').hidden=false; return; }
   if(window.isSecureContext===false){ $('startErr').textContent='Konum yalnızca güvenli (https://) adreste çalışır. Dosyayı bir https adresinde yayınla.'; $('startErr').hidden=false; return; }
   $('start').hidden=true;
-  say('Yol Uyarı aktif. İyi yolculuklar.');
+  if(watchId==null) say('Yol Uyarı aktif. İyi yolculuklar.');
   keepAwake();
   if(watchId==null) watchId=navigator.geolocation.watchPosition(onFix,onGeoErr,{enableHighAccuracy:true,maximumAge:1000,timeout:20000});
 };
