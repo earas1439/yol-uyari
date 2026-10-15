@@ -49,7 +49,34 @@ Diğer markalarda: Ayarlar → Pil → Yol Uyarı → Kısıtlanmamış.
 
 İlk seferde: **Actions** → **Radar Listesini Güncelle** → **Run workflow**. Sonra her pazartesi kendiliğinden yenilenir.
 
-## Firebase (bildirimlerin herkese gitmesi için)
+## Kendi hostingine kurulum (önerilen sunucu)
+
+Bildirimlerin herkese gitmesi için bir sunucu gerekir. En basit yol: herhangi bir PHP hosting
+(cPanel'li paylaşımlı hosting yeterli; PHP 7.4+ ve SQLite olması yeter, neredeyse hepsinde var).
+
+1. Hostingin dosya yöneticisinde `public_html` (veya bir alt klasör) içine şunları yükle:
+   `index.html`, `manifest.json`, `icon-192.png`, `icon-512.png`, `data/` ve `api/` klasörleri.
+2. Tarayıcıda `https://alanadin.com/api/?action=ping` aç. `{"ok":true,...}` görüyorsan sunucu hazır.
+3. `https://alanadin.com/` adresini aç. Başlangıç ekranında **"Canlı mod (kendi sunucun)"** yazmalı.
+   Uygulama sunucuyu kendisi bulur, ayar gerekmez.
+
+- Veritabanı ilk istekte `api/data/yoluyari.sqlite` olarak kendiliğinden oluşur. MySQL istersen
+  `api/config.example.php` dosyasını `config.php` adıyla kopyalayıp doldur.
+- Sayfayı GitHub Pages'te tutup sunucuyu başka yerde çalıştırmak da olur: `index.html` içinde
+  `const API_URL = 'https://alanadin.com/api/';` yaz.
+- APK'nın arayüzü yüklediği adres `app/lib/main.dart` içindeki `kAppUrl`. Siteyi kendi alan adına
+  taşırsan bu satırı da değiştir.
+- Spam koruması: aynı cihaz/IP saatte en fazla 20 bildirim, 120 oy. Aynı yere aynı tür ikinci bildirim
+  yeni nokta açmaz, mevcut noktayı onaylar. 3 "yok" oyu fazlası olan nokta gizlenir ve silinir.
+- Radar listesi GitHub'da her hafta güncellenir; uygulama hosting'deki kopyayla GitHub'dakinden
+  hangisi yeniyse onu kullanır.
+
+**Render.com ve benzerleri:** Depodaki `Dockerfile` ile çalışır. Ancak ücretsiz planda sunucu 15 dakika
+kullanılmayınca uyur (ilk istek ~1 dk gecikir) ve disk kalıcı olmadığı için veriler silinir. Sürekli
+kullanım için ücretli plan + kalıcı disk ya da MySQL gerekir. Bu yüzden paylaşımlı PHP hosting daha
+ucuz ve sorunsuzdur.
+
+## Firebase (alternatif sunucu)
 
 1. https://console.firebase.google.com → **Proje oluştur** (Analytics gerekmez).
 2. **Build → Authentication → Başlayın → Sign-in method → Anonim → Etkinleştir → Kaydet**.

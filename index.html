@@ -891,10 +891,15 @@ body.night .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85
 </script>
 <script>
 // ============================================================
-// FIREBASE AYARI
-// Firebase Console > Proje ayarları > Uygulamalarınız > Web (</>)
-// "firebaseConfig" nesnesini aşağıya yapıştır. null kalırsa yerel mod.
+// SUNUCU AYARI — paylaşımlı bildirimler için üç seçenek, sırayla denenir:
+// 1) Kendi sunucun (PHP): api/ klasörünü bu sayfayla aynı hostinge yüklediysen
+//    hiçbir şey yazma, uygulama onu kendisi bulur. Sunucu başka bir adresteyse
+//    (ör. sayfa GitHub Pages'te, api başka hostingde) adresini API_URL'e yaz:
+//    const API_URL = 'https://alanadin.com/api/';
+// 2) Firebase: "firebaseConfig" nesnesini FIREBASE_CONFIG'e yapıştır.
+// 3) İkisi de yoksa yerel mod: bildirimler yalnızca bu cihazda kalır.
 // ============================================================
+const API_URL = null;
 const FIREBASE_CONFIG = null;
 /* Örnek:
 const FIREBASE_CONFIG = {
@@ -1007,6 +1012,12 @@ const remote = new Map();   // Firestore (herkesin bildirimleri)
 let localReports = store.get('local',[]).filter(h=>!h.exp||h.exp>Date.now()); // yerel modda kendi bildirimlerin
 const localVotes = store.get('votes',{}); // id -> 1 | -1
 let db=null, uid=null, fbState='off';     // off | connecting | live | error
+let api=null;                             // kendi sunucunun adresi (bulunursa)
+const deviceId=(()=>{ let id=store.get('dev',null);
+  if(!id){ try{ id='d'+Array.from(crypto.getRandomValues(new Uint8Array(12)),b=>b.toString(16).padStart(2,'0')).join(''); }
+    catch(e){ id='d'+Date.now().toString(36)+Math.random().toString(36).slice(2,12); } store.set('dev',id); }
+  return id; })();
+const shared=()=>!!(db||api);
 
 function allHazards(){
   const m=new Map(osm); for(const [k,v] of official) m.set(k,v); for(const [k,v] of remote) m.set(k,v); for(const h of localReports) m.set(h.id,h);
@@ -1030,9 +1041,12 @@ map.on('contextmenu',e=>openPointMenu(e.latlng.lat,e.latlng.lng)); // uzun basma
 const $=id=>document.getElementById(id);
 $('voiceBtn').innerHTML=ic(cfg.voice?'vol':'mute'); $('voiceBtn').classList.toggle('off',!cfg.voice);
 $('setBtn').innerHTML=ic('gear'); $('fab').innerHTML=ic('plus'); $('recenter').innerHTML=ic('locate');
-$('modeLine').innerHTML = FIREBASE_CONFIG
-  ? '<span class="dot live"></span>Canlı mod: bildirimler tüm kullanıcılarla paylaşılır'
-  : '<span class="dot warn"></span>Yerel mod: Firebase ayarı yok, bildirimler yalnızca bu cihazda kalır';
+function setModeLine(){
+  $('modeLine').innerHTML = api ? '<span class="dot live"></span>Canlı mod (kendi sunucun): bildirimler tüm kullanıcılarla paylaşılır'
+    : FIREBASE_CONFIG ? '<span class="dot live"></span>Canlı mod (Firebase): bildirimler tüm kullanıcılarla paylaşılır'
+    : '<span class="dot warn"></span>Yerel mod: sunucu bağlı değil, bildirimler yalnızca bu cihazda kalır';
+  if(native.ok()) $('modeLine').insertAdjacentHTML('beforeend',' · Android uygulaması');
+}
 
 // İşaretçiler
 const layers=new Map(); // id -> {key, layer}
@@ -1163,10 +1177,14 @@ function addOsm(els){
 }
 // Türkiye radar listesi (GitHub her hafta günceller): internet zayıfken de uyarı verir
 let bundled={count:0,date:null};
+// Hosting'deki kopya eskiyse GitHub'daki haftalık güncel liste kullanılır (hangisi yeniyse)
+const RADAR_LIST_URLS=['data/radars-tr.json','https://raw.githubusercontent.com/earas1439/yol-uyari/main/data/radars-tr.json'];
 async function loadBundled(){
   try{
-    const r=await fetch('data/radars-tr.json',{cache:'no-cache'}); if(!r.ok) return;
-    const js=await r.json(); const els=js.elements||[];
+    const got=await Promise.all(RADAR_LIST_URLS.map(u=>fetch(u,{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null)));
+    const js=got.filter(x=>x&&x.elements&&x.elements.length).sort((a,b)=>String(b.generated||'').localeCompare(String(a.generated||'')))[0];
+    if(!js) return;
+    const els=js.elements;
     addOsm(els); bundled={count:els.filter(e=>e.type==='node'&&e.tags&&(e.tags.highway==='speed_camera'||e.tags.enforcement)).length,date:js.generated};
     dataChanged();
   }catch(e){}
@@ -1369,7 +1387,46 @@ function fromDoc(d){ const m=d.data();
     note:m.note||null,conf:m.confirmations||0,deny:m.denials||0,source:m.source||'user',created:tsToMs(m.createdAt),exp:tsToMs(m.expiresAt),remote:true,
     mine:m.reporterId===uid}; }
 let remoteCenter=null, remoteUnsubs=[], chunkData=[];
+// ---------- Kendi sunucun (PHP api/) ----------
+async function initBackend(){
+  const cands = API_URL ? [API_URL.endsWith('/')?API_URL:API_URL+'/'] : ['api/'];
+  for(const base of cands){
+    try{
+      const r=await fetch(base+'?action=ping',{cache:'no-store'});
+      if(r.ok){ const j=await r.json(); if(j && j.app==='yol-uyari'){ api=base; fbState='live'; status(); setModeLine(); if(lastPos) watchRemote(lastPos); return; } }
+    }catch(e){ /* sunucu yok */ }
+  }
+  setModeLine();
+  await initFirebase();
+}
+const apiHeaders=()=>({'Content-Type':'application/json','X-Device-Id':deviceId});
+const fromApi=m=>({id:'srv_'+m.id,sid:m.id,type:TYPES[m.type]?m.type:'natural',sub:m.subtype||null,lat:m.lat,lng:m.lng,
+  heading:m.heading??null,limit:m.speedLimit??null,note:m.note||null,conf:m.confirmations||0,deny:m.denials||0,
+  source:'user',created:m.createdAt,exp:m.expiresAt,remote:true,mine:!!m.mine});
+let apiCenter=null, apiTimer=null, apiPolled=false;
+function watchApi(c){
+  if(apiCenter && dist(apiCenter,c)<3000) return;
+  apiCenter=c; clearInterval(apiTimer); pollApi(); apiTimer=setInterval(pollApi,10000);
+}
+async function pollApi(){
+  const c=apiCenter; if(!c||!api) return;
+  try{
+    const r=await fetch(`${api}?action=hazards&lat=${c.lat.toFixed(5)}&lng=${c.lng.toFixed(5)}&radius=8000`,{headers:{'X-Device-Id':deviceId},cache:'no-store'});
+    if(!r.ok) throw new Error(r.status);
+    const list=await r.json();
+    const before=new Set(remote.keys()), notify=apiPolled;
+    remote.clear();
+    for(const m of list){
+      const h=fromApi(m); remote.set(h.id,h);
+      if(notify && !before.has(h.id) && !h.mine && lastPos && Date.now()-h.created<120000)
+        toast(`Yeni bildirim · ${hTitle(h)}, ${fmtD(dist(lastPos,h))} uzakta`);
+    }
+    apiPolled=true; fbState='live'; status(); dataChanged();
+  }catch(e){ fbState='error'; status(); }
+}
+
 function watchRemote(c){
+  if(api){ watchApi(c); return; }
   if(!db) return;
   if(remoteCenter && dist(remoteCenter,c)<3000) return;
   remoteCenter=c; remoteUnsubs.forEach(u=>u()); remoteUnsubs=[]; chunkData=[];
@@ -1389,6 +1446,13 @@ function watchRemote(c){
 }
 async function report(d){
   const t=TYPES[d.type];
+  if(api){
+    const r=await fetch(api+'?action=report',{method:'POST',headers:apiHeaders(),
+      body:JSON.stringify({type:d.type,subtype:d.sub,lat:d.lat,lng:d.lng,heading:d.heading,speedLimit:d.limit})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok) throw {code:j.error||('HTTP '+r.status)};
+    pollApi(); return;
+  }
   if(db){
     const F=firebase.firestore;
     await db.collection('hazards').add({type:d.type,subtype:d.sub,lat:d.lat,lng:d.lng,heading:d.heading,speedLimit:d.limit,note:null,
@@ -1402,6 +1466,14 @@ async function report(d){
   }
 }
 async function vote(h,ok){
+  if(api && h.sid){
+    const r=await fetch(api+'?action=vote',{method:'POST',headers:apiHeaders(),body:JSON.stringify({id:+h.sid,value:ok?1:-1})});
+    const j=await r.json().catch(()=>({}));
+    if(r.status===409) throw {code:'already-voted'};
+    if(r.status===404) throw {code:'not-found'};
+    if(!r.ok) throw {code:j.error||('HTTP '+r.status)};
+    pollApi(); return;
+  }
   if(db && h.remote){
     const F=firebase.firestore, ref=db.collection('hazards').doc(h.id), vref=ref.collection('votes').doc(uid);
     await db.runTransaction(async tx=>{
@@ -1744,7 +1816,7 @@ function openRouteList(){
 // ---------- HUD ----------
 function status(){
   const dot=$('dot');
-  dot.className='dot '+(fbState==='live'?'live':fbState==='error'||!FIREBASE_CONFIG?'warn':'');
+  dot.className='dot '+(fbState==='live'?'live':fbState==='error'||!(FIREBASE_CONFIG||api)?'warn':'');
 }
 let bannerKey='';
 function hud(){
@@ -1803,8 +1875,7 @@ $('go').onclick=async()=>{
   keepAwake();
   if(watchId==null) watchId=navigator.geolocation.watchPosition(onFix,onGeoErr,{enableHighAccuracy:true,maximumAge:1000,timeout:20000});
 };
-status(); initFirebase(); syncMarkers(); loadBundled();
-if(native.ok()) $('modeLine').insertAdjacentHTML('beforeend',' · Android uygulaması');
+setModeLine(); status(); initBackend(); syncMarkers(); loadBundled();
 
 // ---------- Kontroller ----------
 $('recenter').onclick=()=>{ follow=true; $('recenter').hidden=true; if(lastPos) map.setView([lastPos.lat,lastPos.lng],Math.max(map.getZoom(),15)); };
@@ -1843,7 +1914,7 @@ function openReport(lat,lng,heading,where){
       const enfT=TYPES[r.type].enf;
       const d={type:r.type,sub:(r.type==='natural'||r.type==='eds')?r.sub:null,lat,lng,heading:enfT?heading:null,limit:enfT?r.limit:null};
       $('send').disabled=true;
-      try{ await report(d); closeSheet(); toast(db?'Bildirildi. Çevredeki herkes anında görüyor.':'Bildirildi (yerel mod: yalnızca bu cihazda).'); }
+      try{ await report(d); closeSheet(); toast(shared()?'Bildirildi. Çevredeki herkes görüyor.':'Bildirildi (yerel mod: yalnızca bu cihazda).'); }
       catch(e){ $('send').disabled=false; toast('Gönderilemedi: '+(e.code||e.message),5000); }
     };
   };
@@ -1871,7 +1942,8 @@ function openHazard(h){
   $('vy').onclick=()=>go(true); $('vn').onclick=()=>go(false);
 }
 function openSettings(){
-  const fbLine = !FIREBASE_CONFIG ? 'Yerel mod (Firebase ayarı yok)' : fbState==='live' ? 'Canlı: bildirimler herkesle paylaşılıyor' : fbState==='error' ? 'Canlı bağlantı hatası' : 'Bağlanıyor…';
+  const via = api ? 'kendi sunucun' : 'Firebase';
+  const fbLine = !(api||FIREBASE_CONFIG) ? 'Yerel mod (sunucu bağlı değil)' : fbState==='live' ? `Canlı (${via}): bildirimler herkesle paylaşılıyor` : fbState==='error' ? `Bağlantı hatası (${via})` : 'Bağlanıyor…';
   openSheet(`<h3>Ayarlar</h3>
     <div>
       <label class="sw">${ic('vol')}<span class="lab">Sesli uyarı</span><input type="checkbox" id="s-voice" ${cfg.voice?'checked':''}></label>

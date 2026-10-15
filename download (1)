@@ -1,0 +1,4 @@
+# Veritabanı ve ayar dosyalarına dışarıdan erişimi kapat
+<FilesMatch "\.(sqlite|sqlite-wal|sqlite-shm)$|^config\.php$">
+  Require all denied
+</FilesMatch>
