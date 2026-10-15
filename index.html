@@ -821,6 +821,18 @@ body.night .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85
 .choice .go2{background:#1F6FEB;border-color:#1F6FEB;color:#fff}
 .flag{width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#1F6FEB;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.5);display:grid;place-items:center}
 .flag i{width:10px;height:10px;border-radius:50%;background:#fff}
+.leftcol{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.speedo{position:relative}
+.curlim{position:absolute;right:-12px;top:-12px;width:44px;height:44px;border-radius:50%;background:#fff;border:5px solid #D7262C;color:#111;display:grid;place-items:center;font-family:var(--font-display);font-weight:700;font-size:18px;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.avgbox{display:flex;align-items:baseline;gap:6px;background:rgba(24,33,41,.97);border:1px solid var(--line);border-radius:12px;padding:6px 10px;box-shadow:0 4px 14px rgba(0,0,0,.45);font-variant-numeric:tabular-nums;white-space:nowrap}
+.avgbox b{font-family:var(--font-display);font-size:26px;line-height:1}
+.avgbox .al{font-size:11px;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.avgbox .ar{font-size:12px;color:var(--muted)}
+.avgbox.over{background:#B3242A;border-color:#FF6B70}
+.avgbox.over .al,.avgbox.over .ar{color:#FFD5D6}
+.wx{display:flex;flex-wrap:wrap;gap:6px;pointer-events:none}
+.wxchip{display:flex;align-items:center;gap:6px;background:#0E5C8A;color:#fff;border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.4)}
+.wxchip .ic{width:15px;height:15px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -836,11 +848,15 @@ body.night .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85
     <button class="round" id="setBtn" aria-label="Ayarlar"></button>
   </div>
   <button class="navcard" id="navcard" hidden></button>
+  <div class="wx" id="wx" hidden></div>
   <div class="say" id="say" hidden></div>
 </div>
 
 <div class="bottom">
-  <div class="speedo" id="speedo"><div><b id="spd">–</b><span>KM/S</span></div></div>
+  <div class="leftcol">
+    <div class="avgbox" id="avgbox" hidden></div>
+    <div class="speedo" id="speedo"><div><b id="spd">–</b><span>KM/S</span></div><div class="curlim" id="curlim" hidden></div></div>
+  </div>
   <div class="trip" id="trip" hidden>
     <button class="tinfo" id="tripInfo"><b id="tripMain"></b><small id="tripSub"></small></button>
     <button class="end" id="tripEnd" aria-label="Rotayı bitir"></button>
@@ -930,6 +946,7 @@ const ICONS = {
   t_uturn:'<path d="M16 20V9a4 4 0 0 0-8 0v4M4.5 10.5L8 14l3.5-3.5"/>',
   t_round:'<circle cx="12" cy="10" r="4"/><path d="M12 14v7M15 7l4-4M15.5 3H19v3.5"/>',
   t_arrive:'<path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/>',
+  wind:'<path d="M3 8h10a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7"/>',
 };
 const ic = n => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
 
@@ -947,9 +964,11 @@ const SUB = {
   snowIce:['Kar / buzlanma','snow'], fog:['Yoğun sis','fog'], earthquake:['Deprem hasarı','quake'],
   storm:['Fırtına','storm'], other:['Diğer','other'],
 };
-const hTitle = h => h.type==='natural' && SUB[h.sub] ? SUB[h.sub][0] : TYPES[h.type].label;
+const EDS_SUB = { avgStart:['Ortalama hız başlangıcı','ortalama hız koridoru başlangıcı'], avgEnd:['Ortalama hız bitişi','ortalama hız koridoru sonu'] };
+const hTitle = h => h.mag ? `Deprem M${h.mag.toFixed(1).replace('.',',')}`
+  : h.type==='natural' && SUB[h.sub] ? SUB[h.sub][0] : h.type==='eds' && EDS_SUB[h.sub] ? EDS_SUB[h.sub][0] : TYPES[h.type].label;
 const hIcon  = h => h.type==='natural' && SUB[h.sub] ? SUB[h.sub][1] : TYPES[h.type].icon;
-const hSpoken= h => h.type==='natural' && SUB[h.sub] ? SUB[h.sub][0].toLowerCase() : TYPES[h.type].spoken;
+const hSpoken= h => h.type==='natural' && SUB[h.sub] ? SUB[h.sub][0].toLowerCase() : h.type==='eds' && EDS_SUB[h.sub] ? EDS_SUB[h.sub][1] : TYPES[h.type].spoken;
 
 // ---------- Coğrafya ----------
 const R_EARTH=6371008.8, rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI;
@@ -974,19 +993,23 @@ function geohashCover(c,radius){ const dLat=radius/111320, dLon=radius/(111320*M
 const store={ get(k,d){ try{ const v=localStorage.getItem('yu.'+k); return v==null?d:JSON.parse(v);}catch(e){return d;} },
   set(k,v){ try{ localStorage.setItem('yu.'+k,JSON.stringify(v)); }catch(e){} } };
 const cfg={ voice:store.get('voice',true), zone:store.get('zone',false), night:store.get('night',true),
+  beep:store.get('beep',true), limWarn:store.get('limWarn',true), wx:store.get('wx',true), quake:store.get('quake',true),
   enabled:new Set(store.get('types',Object.keys(TYPES))) };
-const saveCfg=()=>{ store.set('voice',cfg.voice); store.set('zone',cfg.zone); store.set('night',cfg.night); store.set('types',[...cfg.enabled]); };
+const saveCfg=()=>{ store.set('voice',cfg.voice); store.set('zone',cfg.zone); store.set('night',cfg.night); store.set('beep',cfg.beep);
+  store.set('limWarn',cfg.limWarn); store.set('wx',cfg.wx); store.set('quake',cfg.quake); store.set('types',[...cfg.enabled]); };
 document.body.classList.toggle('night',cfg.night);
 
 // ---------- Veri durumu ----------
 const osm = new Map();      // OpenStreetMap'ten canlı çekilen sabit radarlar
+const official = new Map(); // otomatik resmî kaynaklar (deprem)
+const corridors = new Map(); // OSM ortalama hız koridorları: id -> {start,end,limit}
 const remote = new Map();   // Firestore (herkesin bildirimleri)
 let localReports = store.get('local',[]).filter(h=>!h.exp||h.exp>Date.now()); // yerel modda kendi bildirimlerin
 const localVotes = store.get('votes',{}); // id -> 1 | -1
 let db=null, uid=null, fbState='off';     // off | connecting | live | error
 
 function allHazards(){
-  const m=new Map(osm); for(const [k,v] of remote) m.set(k,v); for(const h of localReports) m.set(h.id,h);
+  const m=new Map(osm); for(const [k,v] of official) m.set(k,v); for(const [k,v] of remote) m.set(k,v); for(const h of localReports) m.set(h.id,h);
   return [...m.values()];
 }
 const isExpired=h=>h.exp && h.exp<Date.now();
@@ -1049,19 +1072,38 @@ let carMarker=null;
 let trVoice=null;
 function pickVoice(){ if(!('speechSynthesis' in window)) return; trVoice=speechSynthesis.getVoices().find(v=>(v.lang||'').toLowerCase().startsWith('tr'))||null; }
 if('speechSynthesis' in window){ pickVoice(); speechSynthesis.onvoiceschanged=pickVoice; }
+// Android uygulaması (APK) içinde açıldıysa konum ve ses telefonun kendi servislerinden gelir
+const native={ ok:()=>!!(window.flutter_inappwebview&&window.flutter_inappwebview.callHandler),
+  call:(n,...a)=>{ try{ return Promise.resolve(window.flutter_inappwebview.callHandler(n,...a)); }catch(e){ return Promise.resolve(null); } } };
+let actx=null;
+function webBeep(){
+  try{
+    actx=actx||new (window.AudioContext||window.webkitAudioContext)();
+    const t0=actx.currentTime+0.02;
+    [0,0.18].forEach(off=>{ const o=actx.createOscillator(), g=actx.createGain();
+      o.type='sine'; o.frequency.value=off?1175:880;
+      g.gain.setValueAtTime(0.0001,t0+off); g.gain.exponentialRampToValueAtTime(0.45,t0+off+0.015); g.gain.exponentialRampToValueAtTime(0.0001,t0+off+0.13);
+      o.connect(g); g.connect(actx.destination); o.start(t0+off); o.stop(t0+off+0.14); });
+  }catch(e){}
+}
 let sayT;
-function say(text){
+function say(text,beep=false){
   const el=$('say'); el.innerHTML=ic('vol')+'<span></span>'; el.lastChild.textContent=text; el.hidden=false;
   clearTimeout(sayT); sayT=setTimeout(()=>el.hidden=true,6000);
-  if(!cfg.voice||!('speechSynthesis' in window)) return;
-  try{ const u=new SpeechSynthesisUtterance(text); u.lang='tr-TR'; if(trVoice) u.voice=trVoice; u.rate=1.0; u.volume=1; speechSynthesis.speak(u);}catch(e){}
+  if(!cfg.voice) return;
+  const b=beep&&cfg.beep;
+  if(b) webBeep();
+  if(native.ok()){ setTimeout(()=>native.call('speak',text),b?380:0); return; }
+  if(!('speechSynthesis' in window)) return;
+  try{ const u=new SpeechSynthesisUtterance(text); u.lang='tr-TR'; if(trVoice) u.voice=trVoice; u.rate=1.0; u.volume=1;
+    if(b) setTimeout(()=>speechSynthesis.speak(u),380); else speechSynthesis.speak(u); }catch(e){}
 }
 function announce(h,d,kmh){
   const m=Math.max(50,Math.round(d/50)*50); let t;
   if(cfg.zone && TYPES[h.type].enf) t=`${m} metre sonra denetim bölgesi.`;
   else if(TYPES[h.type].enf){ t=`${m} metre sonra ${hSpoken(h)}.`; if(h.limit){ t+=` Hız sınırı ${h.limit}.`; if(kmh>h.limit+2) t+=' Lütfen yavaşlayın.'; } }
   else t=`Dikkat! ${m} metre sonra ${hSpoken(h)}. Dikkatli sürün.`;
-  say(t);
+  say(t,true);
 }
 
 let toastT;
@@ -1073,7 +1115,7 @@ async function loadOsm(c){
   if(osmBusy || Date.now()<osmNextTry) return;
   if(osmCenter && dist(osmCenter,c)<7000) return;
   osmBusy=true;
-  const q=`[out:json][timeout:25];(node["highway"="speed_camera"](around:15000,${c.lat},${c.lng});node["enforcement"="maxspeed"](around:15000,${c.lat},${c.lng}););out body;`;
+  const q=`[out:json][timeout:25];(node["highway"="speed_camera"](around:15000,${c.lat},${c.lng});node["enforcement"="maxspeed"](around:15000,${c.lat},${c.lng}););out body;relation["enforcement"="average_speed"](around:40000,${c.lat},${c.lng});out body;node(r);out body;`;
   const els=await overpass(q);
   osmBusy=false;
   if(els){ addOsm(els); osmCenter=c; dataChanged(); } else osmNextTry=Date.now()+60000;
@@ -1089,13 +1131,205 @@ async function overpass(q){
   }
   return null;
 }
+function parseMaxspeed(v){
+  if(v==null) return null; v=String(v).trim();
+  const named={'TR:urban':50,'TR:rural':90}; if(named[v]) return named[v];
+  const m=v.match(/^(\d+(?:\.\d+)?)\s*(mph)?$/); if(!m) return null;
+  const n=m[2]?Math.round(+m[1]*1.609):Math.round(+m[1]); return n>0&&n<=160?n:null;
+}
 function addOsm(els){
+  const nodes=new Map(), edsNodes=new Map();
+  for(const e of els) if(e.type==='node') nodes.set(e.id,e);
+  // Ortalama hız koridorları (relation enforcement=average_speed)
+  for(const r of els){
+    if(r.type!=='relation'||!r.tags||r.tags.enforcement!=='average_speed') continue;
+    const lim=parseMaxspeed(r.tags.maxspeed), mem=(r.members||[]).filter(m=>m.type==='node');
+    const devs=mem.filter(m=>m.role==='device');
+    const f=mem.find(m=>m.role==='from')||devs[0], t=mem.find(m=>m.role==='to')||devs[devs.length-1];
+    const fn=f&&nodes.get(f.ref), tn=t&&nodes.get(t.ref);
+    if(fn&&tn&&fn!==tn) corridors.set(r.id,{id:r.id,start:{lat:fn.lat,lng:fn.lon},end:{lat:tn.lat,lng:tn.lon},limit:lim});
+    devs.forEach(m=>edsNodes.set(m.ref,lim));
+  }
   for(const el of els){
-    if(el.lat==null) continue;
-    const tg=el.tags||{}; const lim=parseFloat(tg.maxspeed); const dir=parseFloat(tg.direction||tg['camera:direction']);
-    osm.set('osm_'+el.id,{id:'osm_'+el.id,type:'fixedRadar',lat:el.lat,lng:el.lon,limit:lim>0&&lim<=160?Math.round(lim):null,
+    if(el.type!=='node'||el.lat==null) continue;
+    const tg=el.tags||{};
+    if(tg.highway!=='speed_camera' && !tg.enforcement) continue;
+    const dir=parseFloat(tg.direction||tg['camera:direction']);
+    const isEds=edsNodes.has(el.id);
+    osm.set('osm_'+el.id,{id:'osm_'+el.id,type:isEds?'eds':'fixedRadar',lat:el.lat,lng:el.lon,
+      limit:parseMaxspeed(tg.maxspeed)||(isEds?edsNodes.get(el.id):null),
       heading:dir>=0&&dir<=360?dir:null,sub:null,conf:0,deny:0,source:'osm',created:null,exp:null});
   }
+}
+// Türkiye radar listesi (GitHub her hafta günceller): internet zayıfken de uyarı verir
+let bundled={count:0,date:null};
+async function loadBundled(){
+  try{
+    const r=await fetch('data/radars-tr.json',{cache:'no-cache'}); if(!r.ok) return;
+    const js=await r.json(); const els=js.elements||[];
+    addOsm(els); bundled={count:els.filter(e=>e.type==='node'&&e.tags&&(e.tags.highway==='speed_camera'||e.tags.enforcement)).length,date:js.generated};
+    dataChanged();
+  }catch(e){}
+}
+
+// ---------- Bulunduğun yolun hız sınırı (OSM maxspeed) ----------
+let roadWays=[], roadCenter=null, roadBusy=false, roadNext=0, curLimit=null, curRoad='', lastMatchT=0, overSince=0, lastOverWarn=0;
+async function loadRoads(c){
+  if(roadBusy||Date.now()<roadNext) return;
+  if(roadCenter&&dist(roadCenter,c)<700) return;
+  roadBusy=true; roadNext=Date.now()+20000;
+  const q=`[out:json][timeout:25];way["highway"]["maxspeed"](around:1500,${c.lat},${c.lng});out tags geom;`;
+  const els=await overpass(q); roadBusy=false;
+  if(!els) return;
+  roadCenter=c;
+  roadWays=els.filter(w=>w.geometry&&w.geometry.length>1).map(w=>{ const t=w.tags||{};
+    return {id:w.id,g:w.geometry.map(p=>[p.lat,p.lon]),fwd:parseMaxspeed(t['maxspeed:forward']||t.maxspeed),bwd:parseMaxspeed(t['maxspeed:backward']||t.maxspeed),
+      oneway:t.oneway==='yes'||t.highway==='motorway',name:t.name||t.ref||''}; });
+  matchRoad();
+}
+function matchRoad(){
+  if(!lastPos) return;
+  const p=lastPos, k=Math.cos(rad(p.lat)), X=q=>rad(q[1]-p.lng)*R_EARTH*k, Y=q=>rad(q[0]-p.lat)*R_EARTH;
+  const moving=p.heading!=null&&p.kmh>8;
+  let best=null;
+  for(const w of roadWays){
+    const g=w.g;
+    for(let i=0;i<g.length-1;i++){
+      const ax=X(g[i]),ay=Y(g[i]),bx=X(g[i+1]),by=Y(g[i+1]), dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy;
+      if(!L2) continue;
+      const t=clamp(-(ax*dx+ay*dy)/L2,0,1), off=Math.hypot(ax+dx*t,ay+dy*t);
+      if(off>25||(best&&off>=best.off)) continue;
+      let forward=true;
+      if(moving){ const a=angDiff((deg(Math.atan2(dx,dy))+360)%360,p.heading); if(a>40&&a<140) continue; forward=a<=40; if(!forward&&w.oneway) continue; }
+      best={off,w,forward};
+    }
+  }
+  if(best){ curLimit=best.forward?best.w.fwd:best.w.bwd; curRoad=best.w.name; lastMatchT=Date.now(); }
+  else if(Date.now()-lastMatchT>8000){ curLimit=null; curRoad=''; }
+}
+function checkOverspeed(){
+  if(!lastPos||!curLimit||!cfg.limWarn){ overSince=0; return; }
+  const now=lastPos.t||Date.now();
+  if(lastPos.kmh>curLimit+5){
+    if(!overSince) overSince=now;
+    if(now-overSince>4000 && now-lastOverWarn>60000){ lastOverWarn=now; say(`Hız sınırı ${curLimit}. Yavaşlayın.`,true); }
+  } else overSince=0;
+}
+
+// ---------- EDS ortalama hız takibi ----------
+let odo=0, odoPrev=null, avg=null; const avgDone=new Map();
+function updateOdo(here,acc){
+  if(odoPrev && (acc||0)<60){ const d=dist(odoPrev,here); if(d>2 && d<800) odo+=d; }
+  odoPrev=here;
+}
+function startAvg(o){
+  const now=(lastPos&&lastPos.t)||Date.now();
+  if(avgDone.has(o.key) && now-avgDone.get(o.key)<10*60000) return;
+  avg={...o,startT:now,startOdo:odo,lastWarn:0,v:0,km:0};
+  say('Ortalama hız koridoru başladı.'+(o.limit?` Sınır ${o.limit}.`:''),true);
+}
+function checkAvg(){
+  if(!lastPos) return;
+  const p=lastPos, now=p.t||Date.now();
+  if(!avg){
+    for(const c of corridors.values()){
+      if(dist(p,c.start)<45 && dist(p,c.end)>200){ startAvg({key:'c'+c.id,limit:c.limit,end:c.end}); return; }
+    }
+    for(const h of allHazards()){
+      if(h.type!=='eds'||h.sub!=='avgStart'||!visible(h)||dist(p,h)>45) continue;
+      if(h.heading!=null && p.heading!=null && p.kmh>10 && angDiff(h.heading,p.heading)>60) continue;
+      startAvg({key:h.id,limit:h.limit,end:null}); return;
+    }
+    return;
+  }
+  avg.km=(odo-avg.startOdo)/1000;
+  const hrs=(now-avg.startT)/3600e3;
+  avg.v=hrs>0.0005?avg.km/hrs:p.kmh;
+  let ended=false;
+  if(avg.end){ if(dist(p,avg.end)<45) ended=true; }
+  else for(const h of allHazards()){
+    if(h.type==='eds'&&h.sub==='avgEnd'&&visible(h)&&avg.km>0.3&&dist(p,h)<45){ if(h.limit&&!avg.limit) avg.limit=h.limit; ended=true; break; }
+  }
+  if(ended){
+    const v=Math.round(avg.v);
+    say(`Ortalama hız koridoru bitti. Ortalamanız ${v}.`+(avg.limit?(v>avg.limit?' Sınırın üzerinde.':' Sınırın altında.'):''),true);
+    avgDone.set(avg.key,now); avg=null; return;
+  }
+  // Vazgeç: çok uzadı ya da koridor sonundan uzaklaşıyoruz (başka yola sapıldı)
+  if(avg.end){ const de=dist(p,avg.end); avg.minEnd=Math.min(avg.minEnd??de,de); if(de>avg.minEnd+3000){ avg=null; return; } }
+  if(avg.km>60||now-avg.startT>2*3600e3){ avg=null; return; }
+  if(avg.limit && avg.km>0.5 && avg.v>avg.limit+1 && now-avg.lastWarn>90000){
+    avg.lastWarn=now; say(`Ortalama hızınız ${Math.round(avg.v)}. Sınır ${avg.limit}. Yavaşlayın.`,true);
+  }
+}
+function renderAvg(){
+  const el=$('avgbox');
+  if(!avg){ el.hidden=true; return; }
+  el.hidden=false;
+  const v=Math.round(avg.v), over=avg.limit&&v>avg.limit;
+  el.classList.toggle('over',!!over);
+  const rest=avg.end&&lastPos?`${fmtKm(dist(lastPos,avg.end))} kaldı`:`${avg.km.toFixed(1).replace('.',',')} km`;
+  el.innerHTML=`<span class="al">ORT. HIZ</span><b>${v}</b>${avg.limit?`<span class="al">/ ${avg.limit}</span>`:''}<span class="ar"></span>`;
+  el.querySelector('.ar').textContent=rest;
+}
+
+// ---------- Hava durumu riskleri (Open-Meteo) ----------
+let wx=null, wxCenter=null, wxNext=0; const wxSpoken=new Set();
+function weatherRisks(c,vis){
+  const code=c.weather_code, t=c.temperature_2m, gust=c.wind_gusts_10m, pr=c.precipitation||0, snow=c.snowfall||0;
+  const snowCodes=[71,73,75,77,85,86], freezing=[56,57,66,67], risks=[];
+  if(code===45||code===48||(vis!=null&&vis<300)) risks.push({key:'fog',icon:'fog',label:'Yoğun sis'+(vis!=null&&vis<1000?` · görüş ${Math.round(vis)} m`:''),spoken:'bölgede yoğun sis var, görüş mesafesi düşük'});
+  if(freezing.includes(code)||(t!=null&&t<=1&&(pr>0||snow>0||snowCodes.includes(code)))) risks.push({key:'ice',icon:'snow',label:`Buzlanma riski · ${Math.round(t)}°C`,spoken:'yollarda buzlanma riski var'});
+  else if(snowCodes.includes(code)||snow>0) risks.push({key:'snow',icon:'snow',label:'Kar yağışı',spoken:'bölgede kar yağışı var'});
+  if([65,82].includes(code)||pr>=4) risks.push({key:'rain',icon:'flood',label:'Kuvvetli yağış',spoken:'bölgede kuvvetli yağış var, su birikintilerine dikkat'});
+  if([95,96,99].includes(code)) risks.push({key:'storm',icon:'storm',label:'Gök gürültülü fırtına',spoken:'bölgede gök gürültülü fırtına var'});
+  else if(gust!=null&&gust>=60) risks.push({key:'wind',icon:'wind',label:`Kuvvetli rüzgâr · ${Math.round(gust)} km/s`,spoken:'bölgede kuvvetli rüzgâr var'});
+  return {risks,t,code};
+}
+async function loadWeather(c){
+  if(!cfg.wx) return;
+  if(Date.now()<wxNext && wxCenter && dist(wxCenter,c)<15000) return;
+  wxNext=Date.now()+10*60000; wxCenter=c;
+  try{
+    const u=`https://api.open-meteo.com/v1/forecast?latitude=${c.lat.toFixed(3)}&longitude=${c.lng.toFixed(3)}`+
+      `&current=temperature_2m,precipitation,snowfall,weather_code,wind_gusts_10m&hourly=visibility&forecast_hours=1&wind_speed_unit=kmh&timezone=auto`;
+    const r=await fetch(u); if(!r.ok) return;
+    const js=await r.json(); if(!js.current) return;
+    const vis=js.hourly&&js.hourly.visibility?js.hourly.visibility[0]:null;
+    wx=weatherRisks(js.current,vis); renderWx();
+    for(const w of wx.risks) if(!wxSpoken.has(w.key)){ wxSpoken.add(w.key); say(`Dikkat, ${w.spoken}.`,true); }
+  }catch(e){}
+}
+function renderWx(){
+  const el=$('wx');
+  if(!cfg.wx||!wx||!wx.risks.length){ el.hidden=true; return; }
+  el.hidden=false; el.innerHTML='';
+  for(const w of wx.risks){ const s=document.createElement('span'); s.className='wxchip'; s.innerHTML=ic(w.icon)+'<span></span>'; s.lastChild.textContent=w.label; el.appendChild(s); }
+}
+
+// ---------- Depremler (USGS, son 24 saat) ----------
+let quakeNext=0; const quakeSpoken=new Set();
+async function loadQuakes(c){
+  if(!cfg.quake||Date.now()<quakeNext) return;
+  quakeNext=Date.now()+10*60000;
+  try{
+    const r=await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson'); if(!r.ok) return;
+    const js=await r.json();
+    official.clear();
+    for(const f of js.features||[]){
+      const pr=f.properties||{}, co=(f.geometry||{}).coordinates||[], mag=+pr.mag;
+      if(!(mag>=4)||co.length<2) continue;
+      const q={id:'eq_'+f.id,type:'natural',sub:'earthquake',lat:co[1],lng:co[0],mag,place:pr.place||'',heading:null,limit:null,
+        conf:0,deny:0,source:'official',created:pr.time,exp:null,area:true};
+      const d=dist(c,q); if(d>200000) continue;
+      official.set(q.id,q);
+      if(d<120000 && mag>=4.5 && Date.now()-pr.time<6*3600e3 && !quakeSpoken.has(q.id)){
+        quakeSpoken.add(q.id);
+        say(`Dikkat. ${Math.round(d/1000)} kilometre uzakta ${mag.toFixed(1).replace('.',',')} büyüklüğünde deprem oldu. Yollarda hasar olabilir, dikkatli sürün.`,true);
+      }
+    }
+    dataChanged();
+  }catch(e){}
 }
 // Rota boyunca 200 m'lik şeritteki radarlar (uzun yol için)
 async function loadOsmRoute(){
@@ -1107,7 +1341,7 @@ async function loadOsmRoute(){
     if(nav.cum[i]-acc>=spacing || i===nav.coords.length-1){ pts.push(nav.coords[i]); acc=nav.cum[i]; }
   }
   const line=pts.map(c=>`${c[0].toFixed(5)},${c[1].toFixed(5)}`).join(',');
-  const q=`[out:json][timeout:90];(node["highway"="speed_camera"](around:200,${line});node["enforcement"="maxspeed"](around:200,${line}););out body;`;
+  const q=`[out:json][timeout:90];(node["highway"="speed_camera"](around:200,${line});node["enforcement"="maxspeed"](around:200,${line}););out body;relation["enforcement"="average_speed"](around:300,${line});out body;node(r);out body;`;
   const els=await overpass(q);
   if(els && nav===myNav){ addOsm(els); dataChanged(); }
 }
@@ -1196,13 +1430,16 @@ function onFix(p){
     if(heading==null && d>8) heading=bearing(prevFix,here); }
   if(heading==null && lastPos) heading=lastPos.heading;
   if(!prevFix || dist(prevFix,here)>8 || now-prevFix.t>5000) prevFix={...here,t:now};
-  lastPos={...here,kmh:kmh||0,heading,acc:c.accuracy};
+  lastPos={...here,kmh:kmh||0,heading,acc:c.accuracy,t:now};
   if(!carMarker) { carMarker=L.marker([here.lat,here.lng],{icon:carIcon,interactive:false,zIndexOffset:1000}).addTo(map); map.setView([here.lat,here.lng],16); }
   else carMarker.setLatLng([here.lat,here.lng]);
   const svg=carMarker.getElement()?.querySelector('svg'); if(svg && heading!=null) svg.style.transform=`rotate(${heading}deg)`;
   if(follow) map.panTo([here.lat,here.lng],{animate:true,duration:.6});
-  loadOsm(here); watchRemote(here);
+  updateOdo(here,c.accuracy);
+  loadOsm(here); watchRemote(here); loadRoads(here); loadWeather(here); loadQuakes(here);
+  matchRoad();
   evaluate();
+  checkAvg(); checkOverspeed(); hud();
 }
 function onGeoErr(e){
   const msg = e.code===1 ? 'Konum izni reddedildi. Tarayıcı ayarlarından bu siteye konum izni ver.' :
@@ -1233,7 +1470,7 @@ function evaluate(){
     alertNow=best; hud(); return;
   }
   for(const h of allHazards()){
-    if(!visible(h)) continue;
+    if(!visible(h)||h.area) continue;
     const d=dist(lastPos,h);
     if(d>3000){ announced.delete(h.id); continue; }
     if(d>range) continue;
@@ -1359,7 +1596,7 @@ function computeRouteHazards(){
   const box=L.latLngBounds([sw.lat-.002,sw.lng-.003],[ne.lat+.002,ne.lng+.003]);
   nav.hz=[];
   for(const h of allHazards()){
-    if(!visible(h)||!box.contains([h.lat,h.lng])) continue;
+    if(!visible(h)||h.area||!box.contains([h.lat,h.lng])) continue;
     const pr=project(h);
     if(pr.off>40) continue; // rotanın üzerinde değil
     if(h.heading!=null && angDiff(h.heading,routeBearingAt(pr.i))>60) continue; // karşı yöndeki denetim
@@ -1515,7 +1752,10 @@ function hud(){
   $('spd').textContent=kmh==null?'–':kmh;
   const a=alertNow, masked=a && cfg.zone && TYPES[a.h.type].enf;
   const lim=a && !masked ? a.h.limit : null;
-  $('speedo').classList.toggle('over',!!(lim && kmh>lim+2));
+  const effLim=lim||curLimit;
+  $('speedo').classList.toggle('over',!!(effLim && kmh>effLim+2));
+  const cl=$('curlim'); if(curLimit){ cl.hidden=false; cl.textContent=curLimit; } else cl.hidden=true;
+  renderAvg();
   if(!a){
     $('banner').hidden=true; $('idle').hidden=false; bannerKey='';
     if(lastPos){
@@ -1541,8 +1781,21 @@ setInterval(()=>{ // süresi dolanları düşür
 let wakeLock=null;
 async function keepAwake(){ try{ if('wakeLock' in navigator && document.visibilityState==='visible') wakeLock=await navigator.wakeLock.request('screen'); }catch(e){} }
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && watchId!=null) keepAwake(); });
-$('go').onclick=()=>{
+// Android uygulamasından gelen konumlar (ekran kapalıyken de)
+window.YU={
+  nativeFix:(lat,lng,acc,speed,heading,ts)=>onFix({timestamp:ts||Date.now(),coords:{latitude:lat,longitude:lng,accuracy:acc,speed:speed,heading:heading}}),
+  nativeError:msg=>{ $('idleText').textContent=msg; },
+};
+$('go').onclick=async()=>{
   $('startErr').hidden=true;
+  try{ actx=actx||new (window.AudioContext||window.webkitAudioContext)(); actx.resume(); }catch(e){}
+  if(native.ok()){
+    const res=await native.call('startTracking');
+    if(res && res!=='ok'){ $('startErr').textContent=res; $('startErr').hidden=false; return; }
+    $('start').hidden=true;
+    if(watchId==null){ watchId='native'; say('Yol Uyarı aktif. İyi yolculuklar.'); }
+    return;
+  }
   if(!('geolocation' in navigator)){ $('startErr').textContent='Bu tarayıcı konumu desteklemiyor.'; $('startErr').hidden=false; return; }
   if(window.isSecureContext===false){ $('startErr').textContent='Konum yalnızca güvenli (https://) adreste çalışır. Dosyayı bir https adresinde yayınla.'; $('startErr').hidden=false; return; }
   $('start').hidden=true;
@@ -1550,7 +1803,8 @@ $('go').onclick=()=>{
   keepAwake();
   if(watchId==null) watchId=navigator.geolocation.watchPosition(onFix,onGeoErr,{enableHighAccuracy:true,maximumAge:1000,timeout:20000});
 };
-status(); initFirebase(); syncMarkers();
+status(); initFirebase(); syncMarkers(); loadBundled();
+if(native.ok()) $('modeLine').insertAdjacentHTML('beforeend',' · Android uygulaması');
 
 // ---------- Kontroller ----------
 $('recenter').onclick=()=>{ follow=true; $('recenter').hidden=true; if(lastPos) map.setView([lastPos.lat,lastPos.lng],Math.max(map.getZoom(),15)); };
@@ -1577,15 +1831,17 @@ function openReport(lat,lng,heading,where){
     openSheet(`<h3>Ne bildirmek istiyorsun?</h3><div class="meta">${where}</div>
       <div class="grid3">${Object.entries(TYPES).map(([k,v])=>`<button class="tt" data-t="${k}" style="background:${r.type===k?v.color:v.color+'26'};color:${r.type===k?'#fff':v.color};border-color:${r.type===k?v.color:'transparent'}">${ic(v.icon)}<span style="color:${r.type===k?'#fff':'var(--fg)'}">${v.label}</span></button>`).join('')}</div>
       ${r.type==='natural'?`<h4>Olay türü</h4><div class="chips">${Object.entries(SUB).map(([k,[l,i]])=>`<button class="chip" data-s="${k}" aria-pressed="${r.sub===k}">${ic(i)}${l}</button>`).join('')}</div>`:''}
+      ${r.type==='eds'?`<h4>EDS türü</h4><div class="chips">${[['','Tek nokta'],['avgStart','Ortalama hız başlangıcı'],['avgEnd','Ortalama hız bitişi']].map(([k,l])=>`<button class="chip" data-e="${k}" aria-pressed="${(r.sub||'')===k}">${l}</button>`).join('')}</div>`:''}
       ${enf?`<h4>Hız sınırı (isteğe bağlı)</h4><div class="chips">${[30,50,70,82,90,110,120,140].map(l=>`<button class="chip" data-l="${l}" aria-pressed="${r.limit===l}">${l}</button>`).join('')}</div>`:''}
       <button class="wide" id="send" ${r.type&&(r.type!=='natural'||r.sub)?'':'disabled'}>Bildir</button>`);
     const sh=$('sheet');
     sh.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{ r.type=b.dataset.t; r.sub=null; r.limit=null; render(); });
     sh.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{ r.sub=b.dataset.s; render(); });
+    sh.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>{ r.sub=b.dataset.e||null; render(); });
     sh.querySelectorAll('[data-l]').forEach(b=>b.onclick=()=>{ const l=+b.dataset.l; r.limit=r.limit===l?null:l; render(); });
     $('send').onclick=async()=>{
       const enfT=TYPES[r.type].enf;
-      const d={type:r.type,sub:r.type==='natural'?r.sub:null,lat,lng,heading:enfT?heading:null,limit:enfT?r.limit:null};
+      const d={type:r.type,sub:(r.type==='natural'||r.type==='eds')?r.sub:null,lat,lng,heading:enfT?heading:null,limit:enfT?r.limit:null};
       $('send').disabled=true;
       try{ await report(d); closeSheet(); toast(db?'Bildirildi. Çevredeki herkes anında görüyor.':'Bildirildi (yerel mod: yalnızca bu cihazda).'); }
       catch(e){ $('send').disabled=false; toast('Gönderilemedi: '+(e.code||e.message),5000); }
@@ -1597,14 +1853,16 @@ function ago(ms){ if(!ms) return null; const m=Math.round((Date.now()-ms)/60000)
   const h=Math.round(m/60); if(h<24) return `${h} sa önce`; return `${Math.round(h/24)} gün önce`; }
 function openHazard(h){
   const masked=cfg.zone && TYPES[h.type].enf;
-  const src=h.source==='osm'?'Kaynak: OpenStreetMap':h.source==='official'?'Kaynak: resmî':h.mine?'Senin bildirimin':'Sürücü bildirimi';
+  const src=h.source==='osm'?'Kaynak: OpenStreetMap':h.area?'Kaynak: USGS':h.source==='official'?'Kaynak: resmî':h.mine?'Senin bildirimin':'Sürücü bildirimi';
   const meta=[lastPos?fmtD(dist(lastPos,h)):null, h.limit&&!masked?`Sınır ${h.limit} km/s`:null, ago(h.created), src].filter(Boolean).join(' · ');
   openSheet(`<div class="hz-head"><div class="pinbig" style="background:${masked?'#46525C':TYPES[h.type].color}">${ic(masked?'zone':hIcon(h))}</div>
       <div style="min-width:0"><h3 id="hzT"></h3><div class="meta">${meta}</div></div></div>
+    ${h.area?`<p class="note" id="hzPlace"></p><p class="note">Deprem verisi USGS'den otomatik gelir. Merkez üssüne yakın yollarda hasar, heyelan veya kapanma olabilir.</p>`:`
     <div class="votes"><span class="ok">${h.conf||0} kişi “var” dedi</span><span class="no">${h.deny||0} kişi “yok” dedi</span></div>
     <div class="row2"><button class="vbtn yes" id="vy">${ic('check')}Hâlâ orada</button><button class="vbtn no" id="vn">${ic('x')}Yok</button></div>
-    ${!h.remote&&db?'<p class="note">Bu nokta OpenStreetMap verisi; oyun yalnızca bu cihazda saklanır.</p>':''}`);
+    ${!h.remote&&db?'<p class="note">Bu nokta OpenStreetMap verisi; oyun yalnızca bu cihazda saklanır.</p>':''}`}`);
   $('hzT').textContent=masked?'Denetim bölgesi':hTitle(h);
+  if(h.area){ $('hzPlace').textContent=h.place; return; }
   const go=async ok=>{
     $('vy').disabled=$('vn').disabled=true;
     try{ await vote(h,ok); closeSheet(); toast(ok?'Teşekkürler, onaylandı.':'Teşekkürler, oyun kaydedildi.'); }
@@ -1619,15 +1877,23 @@ function openSettings(){
       <label class="sw">${ic('vol')}<span class="lab">Sesli uyarı</span><input type="checkbox" id="s-voice" ${cfg.voice?'checked':''}></label>
       <label class="sw">${ic('zone')}<span class="lab">Bölge modu<small>Denetim noktaları kesin konum yerine 500 m'lik bölge olarak gösterilir. Kesin konum uyarısını kısıtlayan ülkeler için.</small></span><input type="checkbox" id="s-zone" ${cfg.zone?'checked':''}></label>
       <label class="sw">${ic('moon')}<span class="lab">Gece haritası</span><input type="checkbox" id="s-night" ${cfg.night?'checked':''}></label>
+      <label class="sw">${ic('alert')}<span class="lab">Uyarıdan önce bip sesi</span><input type="checkbox" id="s-beep" ${cfg.beep?'checked':''}></label>
+      <label class="sw">${ic('speed')}<span class="lab">Hız sınırı aşım uyarısı<small>Bulunduğun yolun sınırını 5 km/s'ten fazla aşarsan uyarır.</small></span><input type="checkbox" id="s-lim" ${cfg.limWarn?'checked':''}></label>
+      <label class="sw">${ic('fog')}<span class="lab">Hava durumu uyarıları<small>Sis, buzlanma, kar, kuvvetli yağış ve rüzgâr.</small></span><input type="checkbox" id="s-wx" ${cfg.wx?'checked':''}></label>
+      <label class="sw">${ic('quake')}<span class="lab">Deprem uyarıları<small>Son 24 saatte 200 km içindeki 4 ve üzeri depremler.</small></span><input type="checkbox" id="s-quake" ${cfg.quake?'checked':''}></label>
     </div>
     <h4>Uyarı türleri</h4>
     <div>${Object.entries(TYPES).map(([k,v])=>`<label class="sw"><span style="color:${v.color}">${ic(v.icon)}</span><span class="lab">${v.label}</span><input type="checkbox" data-k="${k}" ${cfg.enabled.has(k)?'checked':''}></label>`).join('')}</div>
     <h4>Veri</h4>
-    <p class="note">${fbLine}. Sabit radarlar OpenStreetMap'ten canlı çekilir (${osm.size} nokta yüklü).</p>
+    <p class="note">${fbLine}. Radarlar OpenStreetMap'ten gelir (${osm.size} nokta yüklü${bundled.count?`, Türkiye listesi: ${bundled.count} radar, ${bundled.date?new Date(bundled.date).toLocaleDateString('tr-TR'):''}`:''}). ${corridors.size?`${corridors.size} ortalama hız koridoru biliniyor. `:''}Yol hız sınırları OpenStreetMap, hava durumu Open-Meteo, depremler USGS verisidir.</p>
     <p class="note">Hız sınırlarına her zaman uyun. Bazı ülkelerde (ör. Almanya, İsviçre) sürüşte radar uyarı uygulaması kullanmak yasaktır.</p>`);
   $('s-voice').onchange=e=>{ cfg.voice=e.target.checked; saveCfg(); $('voiceBtn').innerHTML=ic(cfg.voice?'vol':'mute'); $('voiceBtn').classList.toggle('off',!cfg.voice); };
   $('s-zone').onchange=e=>{ cfg.zone=e.target.checked; saveCfg(); bannerKey=''; dataChanged(); };
   $('s-night').onchange=e=>{ cfg.night=e.target.checked; saveCfg(); document.body.classList.toggle('night',cfg.night); };
+  $('s-beep').onchange=e=>{ cfg.beep=e.target.checked; saveCfg(); if(cfg.beep) webBeep(); };
+  $('s-lim').onchange=e=>{ cfg.limWarn=e.target.checked; saveCfg(); };
+  $('s-wx').onchange=e=>{ cfg.wx=e.target.checked; saveCfg(); wxNext=0; renderWx(); if(cfg.wx&&lastPos) loadWeather(lastPos); };
+  $('s-quake').onchange=e=>{ cfg.quake=e.target.checked; saveCfg(); if(!cfg.quake){ official.clear(); dataChanged(); } else { quakeNext=0; if(lastPos) loadQuakes(lastPos); } };
   $('sheet').querySelectorAll('[data-k]').forEach(i=>i.onchange=()=>{ i.checked?cfg.enabled.add(i.dataset.k):cfg.enabled.delete(i.dataset.k); saveCfg(); bannerKey=''; dataChanged(); });
 }
 })();

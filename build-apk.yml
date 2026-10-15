@@ -1,0 +1,64 @@
+# Android APK'yı GitHub'ın bilgisayarında derler.
+# Actions > "APK Derle" > Run workflow. Bitince APK, deponun "Releases"
+# bölümüne eklenir; telefondan oradan indirip kurabilirsin.
+name: APK Derle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/build-apk.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Android projesini oluştur
+        run: flutter create --platforms=android --org com.yoluyari --project-name yol_uyari .
+
+      - name: İzinler, imza ve simge
+        run: |
+          pip install pillow
+          python3 tools/patch_android.py
+
+      - run: flutter pub get
+
+      - name: APK derle
+        run: flutter build apk --release
+
+      - name: APK'yı yeniden adlandır
+        run: cp build/app/outputs/flutter-apk/app-release.apk ../yol-uyari.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yol-uyari-apk
+          path: yol-uyari.apk
+
+      - name: Releases'a ekle
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Yol Uyarı (derleme ${{ github.run_number }})
+          body: "Telefona kurmak için aşağıdaki yol-uyari.apk dosyasını indir."
+          files: yol-uyari.apk
+          make_latest: true

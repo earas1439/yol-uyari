@@ -1,0 +1,19 @@
+name: yol_uyari
+description: Yol Uyarı Android uygulaması (arayüz web sürümünden yüklenir).
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_inappwebview: ^6.1.5
+  geolocator: ^13.0.1
+  flutter_tts: ^4.0.2
+  audio_session: ^0.1.21
+  wakelock_plus: ^1.2.8
+
+flutter:
+  uses-material-design: true
