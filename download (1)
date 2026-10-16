@@ -1,4 +1,10 @@
-# Veritabanı ve ayar dosyalarına dışarıdan erişimi kapat
-<FilesMatch "\.(sqlite|sqlite-wal|sqlite-shm)$|^config\.php$">
-  Require all denied
+# Veritabanı ve ayar dosyalarına dışarıdan erişimi kapat (Apache 2.2 ve 2.4 / LiteSpeed)
+<FilesMatch "(\.sqlite|\.sqlite-wal|\.sqlite-shm|^config\.php)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
 </FilesMatch>

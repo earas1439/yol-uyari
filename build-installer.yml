@@ -1,0 +1,38 @@
+# Site dosyaları değişince tek dosyalık kurulum.php'yi yeniden üretir ve Releases'a koyar.
+name: Kurulum Dosyasını Üret
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "index.html"
+      - "app.js"
+      - "sw.js"
+      - "lib/**"
+      - "admin/**"
+      - "api/**"
+      - "data/**"
+      - "tools/installer_template.php"
+      - "tools/build_installer.py"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: kurulum.php üret
+        run: python3 tools/build_installer.py
+      - name: Sözdizimi kontrolü
+        run: php -l dist/kurulum.php
+      - name: Releases'a ekle
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: kurulum-${{ github.run_number }}
+          name: Hosting kurulum dosyası (${{ github.run_number }})
+          body: "kurulum.php dosyasını indir, hostingde sitenin klasörüne (ör. public_html) yükle ve tarayıcıda alanadin.com/kurulum.php adresini aç."
+          files: dist/kurulum.php
+          make_latest: false

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -52,24 +53,69 @@ class ShellScreen extends StatefulWidget {
   State<ShellScreen> createState() => _ShellScreenState();
 }
 
-class _ShellScreenState extends State<ShellScreen> {
+class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   InAppWebViewController? _web;
   final NativeVoice _voice = NativeVoice();
+  final FlutterLocalNotificationsPlugin _notif = FlutterLocalNotificationsPlugin();
   StreamSubscription<Position>? _posSub;
   bool _loading = true;
   bool _loadError = false;
+  bool _inForeground = true;
+
+  static const _alertDetails = NotificationDetails(
+    android: AndroidNotificationDetails(
+      'yol_uyari_alerts',
+      'Yol uyarıları',
+      channelDescription: 'Radar, kaza, yol çalışması ve duyuru uyarıları',
+      importance: Importance.high,
+      priority: Priority.high,
+    ),
+  );
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _voice.init();
+    _initNotifications();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _posSub?.cancel();
     WakelockPlus.disable();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _inForeground = state == AppLifecycleState.resumed;
+  }
+
+  // ---------------- Bildirimler (uygulama arka plandayken / ekran kapalıyken) ----------------
+
+  Future<void> _initNotifications() async {
+    try {
+      await _notif.initialize(
+        const InitializationSettings(android: AndroidInitializationSettings('@mipmap/ic_launcher')),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _requestNotificationPermission() async {
+    try {
+      await _notif
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+    } catch (_) {}
+  }
+
+  Future<void> _notify(String title, String body, String tag) async {
+    if (_inForeground) return; // uygulama açıkken ekrandaki uyarı yeterli
+    try {
+      await _notif.show(tag.hashCode & 0x7fffffff, title, body, _alertDetails);
+    } catch (_) {}
   }
 
   // ---------------- Konum (ön plan servisi: ekran kapalıyken de çalışır) ----------------
@@ -91,6 +137,7 @@ class _ShellScreenState extends State<ShellScreen> {
     try {
       await WakelockPlus.enable();
     } catch (_) {}
+    await _requestNotificationPermission();
     _posSub ??= Geolocator.getPositionStream(locationSettings: _locationSettings())
         .listen(_onPosition, onError: (Object e) {
       _js('window.YU&&YU.nativeError(${jsonEncode('Konum alınamıyor: $e')})');
@@ -174,6 +221,16 @@ class _ShellScreenState extends State<ShellScreen> {
                     callback: (List<dynamic> args) {
                       final text = args.isNotEmpty ? args[0].toString() : '';
                       if (text.isNotEmpty) _voice.say(text);
+                      return true;
+                    },
+                  );
+                  controller.addJavaScriptHandler(
+                    handlerName: 'notify',
+                    callback: (List<dynamic> args) {
+                      final title = args.isNotEmpty ? args[0].toString() : 'Yol Uyarı';
+                      final body = args.length > 1 ? args[1].toString() : '';
+                      final tag = args.length > 2 ? args[2].toString() : 'uyari';
+                      _notify(title, body, tag);
                       return true;
                     },
                   );

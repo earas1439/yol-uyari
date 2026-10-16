@@ -16,13 +16,20 @@ hedef seçip sesli yol tarifi alabildiğin sürüş uygulaması. Telefonda web s
 | Hedef + yol tarifi | Adres arama veya haritaya uzun basma; Türkçe sesli tarif, rotadan çıkınca yeniden hesaplama |
 | Hava durumu | Sis, buzlanma, kar, kuvvetli yağış, fırtına, kuvvetli rüzgâr (Open-Meteo) |
 | Deprem | Son 24 saatte 200 km içindeki M4+ depremler (USGS); 120 km içinde M4.5+ olursa sesli uyarı |
-| Bildirim + oylama | Herkes bildirir, "Hâlâ orada / Yok" ile doğrular (Firebase bağlıysa herkes görür) |
+| Harita takibi | Araç ortada, gidiş yönü yukarı (pusulayla kuzey-yukarıya geçilir), hıza göre yakınlaşır; elle kaydırınca "Ortala" düğmesi |
+| Bildirim + oylama | Radar, kaza, yol çalışması, kontrol, doğa olayı; "Hâlâ orada / Yok" ile doğrulama |
+| Yönetim paneli | `alanadin.com/admin`: istatistikler, haritadan nokta ekleme/silme, CSV içe aktarma, kullanıcı engelleme, toplu bildirim, uygulama ayarları |
+| Çevrimdışı harita | Ülke, il, ilçe, mahalle, ekrandaki alan ya da rota boyunca harita indirilir; internet yokken uygulama ve harita açılır |
+| Trafik yoğunluğu | Kullanıcıların anonim hız verisinden yoğunluk çizgileri ve "ileride yoğun trafik" uyarısı; TomTom anahtarıyla tüm dünyada canlı trafik |
+| Arka plan bildirimi | Uygulama arka plandayken uyarılar ve duyurular telefon bildirimi olarak gelir |
 | Ses | Uyarıdan önce bip; APK'da müzik açıksa sesi kısıp konuşur, ekran kapalıyken de çalışır |
 
 ## Depo yapısı
 
 ```
-index.html, manifest.json, icon-*.png   Uygulamanın kendisi (GitHub Pages bunu yayınlar)
+index.html, app.js, sw.js, lib/         Uygulamanın kendisi
+admin/                                  Yönetim paneli
+api/                                    Sunucu (PHP): index.php uygulama, admin.php panel, lib.php ortak
 data/radars-tr.json                     Türkiye radar listesi (otomatik güncellenir)
 app/                                    Android uygulaması (arayüzü web adresinden yükler)
 tools/build_radar_data.py               Radar listesini OpenStreetMap'ten üretir
@@ -54,15 +61,24 @@ Diğer markalarda: Ayarlar → Pil → Yol Uyarı → Kısıtlanmamış.
 Bildirimlerin herkese gitmesi için bir sunucu gerekir. En basit yol: herhangi bir PHP hosting
 (cPanel'li paylaşımlı hosting yeterli; PHP 7.4+ ve SQLite olması yeter, neredeyse hepsinde var).
 
+**Tek dosyayla kurulum (en kolayı):**
+1. `dist/kurulum.php` dosyasını (ya da Releases'taki en yeni "Hosting kurulum dosyası"nı) hostingde
+   `public_html` klasörüne yükle.
+2. Tarayıcıda `https://alanadin.com/kurulum.php` aç. Sunucu kontrol edilir; **Kur**'a bas.
+3. Dosyalar, veritabanı ve güncel radar listesi kurulur, kurulum dosyası kendini siler.
+   Güncelleme için aynı işlemi tekrarla ("yeniden kur"); bildirimler silinmez.
+
+**Elle kurulum:**
 1. Hostingin dosya yöneticisinde `public_html` (veya bir alt klasör) içine şunları yükle:
-   `index.html`, `manifest.json`, `icon-192.png`, `icon-512.png`, `data/` ve `api/` klasörleri.
+   `index.html`, `app.js`, `sw.js`, `manifest.json`, iki ikon ve `lib/`, `data/`, `api/`, `admin/` klasörleri.
+   Yönetici hesabı için ardından `kurulum.php` ile kurulum yap (elle kurulumda `api/config.php` gerekir).
 2. Tarayıcıda `https://alanadin.com/api/?action=ping` aç. `{"ok":true,...}` görüyorsan sunucu hazır.
 3. `https://alanadin.com/` adresini aç. Başlangıç ekranında **"Canlı mod (kendi sunucun)"** yazmalı.
    Uygulama sunucuyu kendisi bulur, ayar gerekmez.
 
 - Veritabanı ilk istekte `api/data/yoluyari.sqlite` olarak kendiliğinden oluşur. MySQL istersen
   `api/config.example.php` dosyasını `config.php` adıyla kopyalayıp doldur.
-- Sayfayı GitHub Pages'te tutup sunucuyu başka yerde çalıştırmak da olur: `index.html` içinde
+- Sayfayı GitHub Pages'te tutup sunucuyu başka yerde çalıştırmak da olur: `app.js` içinde
   `const API_URL = 'https://alanadin.com/api/';` yaz.
 - APK'nın arayüzü yüklediği adres `app/lib/main.dart` içindeki `kAppUrl`. Siteyi kendi alan adına
   taşırsan bu satırı da değiştir.
@@ -85,10 +101,43 @@ ucuz ve sorunsuzdur.
    Sonra **Kurallar** sekmesine `firebase/firestore.rules` dosyasının içeriğini yapıştır → **Yayınla**.
 4. **Proje ayarları (dişli) → Genel → Uygulamalarınız → Web (</>)** → takma ad yaz → **Uygulamayı kaydet**.
    Çıkan `firebaseConfig = { ... }` bloğunu kopyala.
-5. `index.html` içinde `const FIREBASE_CONFIG = null;` satırını şununla değiştir:
+5. `app.js` içinde `const FIREBASE_CONFIG = null;` satırını şununla değiştir:
    `const FIREBASE_CONFIG = { apiKey: "...", authDomain: "...", projectId: "...", appId: "..." };`
 
 Bu değerler gizli değildir; erişimi güvenlik kuralları korur.
+
+## Çevrimdışı harita
+
+OpenStreetMap'in ücretsiz harita sunucusu toplu indirmeye izin vermez. Bu yüzden uygulama kendi harita dosyasını kullanır:
+
+1. GitHub'da **Actions → Türkiye Haritasını Üret → Run workflow**. Protomaps'in OpenStreetMap'ten ürettiği güncel dünya
+   haritasından Türkiye kesilir ve **Releases**'a `harita` etiketiyle konur (ayrıntı 14'te birkaç yüz MB; her ayın 1'inde yenilenir).
+2. Yönetim panelinde **Ayarlar → Harita dosyası → Sunucuya indir / güncelle**. Dosya parça parça hostingdeki `tiles/turkiye.pmtiles`'a iner.
+   (İstersen Releases'tan indirip dosya yöneticisiyle `tiles/` klasörüne kendin de yükleyebilirsin.)
+3. Uygulama bu dosyayı görünce haritayı ondan çizer. Kullanıcı **Ayarlar → Çevrimdışı haritalar → Bölge indir** ile
+   ülke/il/ilçe/mahalle arar ya da ekrandaki alanı veya aktif rotayı seçer, ayrıntı düzeyini belirleyip indirir.
+   Gezilen yerler de otomatik saklanır. İnternet yokken uygulama ve indirilen haritalar açılır; radar uyarıları, hız sınırı ve
+   son alınan bildirimler çalışır. Rota hesabı ve adres araması için internet gerekir.
+
+## Trafik yoğunluğu
+
+- Uygulamayı kullananlar anonim hız verisi gönderir (kimlik yok; konum, hız, yön). Sunucu son 10 dakikayı yol parçası bazında
+  hesaplar: yeşil akıcı, turuncu yoğun, kırmızı çok yoğun. Sürüşte önünde çok yoğun trafik varsa "2 kilometre sonra yoğun trafik" uyarısı verir.
+  Bu veri ancak kullanıcıların geçtiği yollarda oluşur.
+- Tüm yollar ve tüm dünya için: panelde **Ayarlar → TomTom API anahtarı** gir (developer.tomtom.com, ücretsiz plan). Uygulamadaki trafik
+  düğmesi TomTom'un canlı trafik katmanını da gösterir. Anahtarı TomTom panelinden kendi alan adına kısıtla.
+
+## Yönetim paneli
+
+Kurulumdan sonra `https://alanadin.com/admin/` adresinden, kurulumda belirlediğin kullanıcı adı ve şifreyle girilir.
+
+- **Özet:** aktif nokta sayıları, son 14 günün bildirim grafiği, çevrimiçi ve aktif kullanıcılar.
+- **Harita:** haritaya tıklayıp nokta ekle (radar, EDS, kontrol, kaza, yol çalışması…); noktaya tıklayıp düzenle, sürükleyip taşı, sil.
+  Yöneticinin eklediği noktalar "doğrulanmış" görünür ve kullanıcı oylarıyla gizlenmez.
+- **Uyarı noktaları:** liste, filtre, toplu silme, CSV ile toplu içe aktarma (ör. elindeki EDS listesi).
+- **Kullanıcılar:** uygulama kayıt istemez; her telefon bir cihaz kimliğiyle görünür. Kötüye kullananı engelle, bildirimlerini sil.
+- **Toplu bildirim:** herkese ya da haritada seçtiğin bölgeye duyuru gönder; açık uygulamalarda sesli okunur, arka plandaki APK'da telefon bildirimi olur.
+- **Ayarlar:** bildirimi aç/kapat, bildirilebilecek türler, açılış duyurusu, güncelleme aralığı, spam sınırları, bildirim süreleri, yönetici şifresi.
 
 ## Kendi sunucuna / ücretli servise geçiş
 

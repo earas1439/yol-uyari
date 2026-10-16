@@ -1,0 +1,64 @@
+# Türkiye vektör haritasını (çevrimdışı kullanım için) üretir ve Releases'a "harita" etiketiyle koyar.
+# Kaynak: Protomaps'in OpenStreetMap'ten her gün ürettiği dünya haritası; sadece Türkiye kesilir.
+# Elle çalıştır: Actions > "Türkiye Haritasını Üret" > Run workflow. Her ayın 1'inde kendiliğinden yenilenir.
+# Sonra yönetim panelinde Ayarlar > Harita dosyası > "Sunucuya indir / güncelle".
+name: Türkiye Haritasını Üret
+
+on:
+  workflow_dispatch:
+    inputs:
+      maxzoom:
+        description: "En yüksek ayrıntı (14 önerilir; 15 daha ayrıntılı ama ~2 kat büyük)"
+        default: "14"
+      bbox:
+        description: "Bölge sınırı (batı,güney,doğu,kuzey)"
+        default: "25.5,35.7,45.0,42.3"
+  schedule:
+    - cron: "41 2 1 * *"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MAXZOOM: ${{ inputs.maxzoom || '14' }}
+      BBOX: ${{ inputs.bbox || '25.5,35.7,45.0,42.3' }}
+    steps:
+      - name: pmtiles aracını indir
+        run: |
+          gh release download -R protomaps/go-pmtiles -p '*Linux_x86_64.tar.gz' -O pm.tgz
+          mkdir pm && tar xzf pm.tgz -C pm
+          sudo install "$(find pm -type f -name pmtiles | head -1)" /usr/local/bin/pmtiles
+          pmtiles version || true
+
+      - name: En güncel dünya haritasını bul
+        run: |
+          for i in $(seq 0 14); do
+            d=$(date -u -d "-$i day" +%Y%m%d)
+            if curl -sfI "https://build.protomaps.com/$d.pmtiles" >/dev/null; then
+              echo "SRC=https://build.protomaps.com/$d.pmtiles" >> "$GITHUB_ENV"; echo "Kaynak: $d"; exit 0
+            fi
+          done
+          echo "Protomaps haritası bulunamadı" >&2; exit 1
+
+      - name: Türkiye'yi kes
+        run: |
+          pmtiles extract "$SRC" turkiye.pmtiles --bbox="$BBOX" --maxzoom="$MAXZOOM" --download-threads=8
+          pmtiles show turkiye.pmtiles
+          ls -lh turkiye.pmtiles
+
+      - name: Releases'a koy
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: harita
+          name: Türkiye haritası (çevrimdışı)
+          body: |
+            Yol Uyarı'nın çevrimdışı haritası. Yönetim panelinde Ayarlar > Harita dosyası > "Sunucuya indir / güncelle" ile hostinge kurulur.
+            Veri: © OpenStreetMap katkıcıları (ODbL), Protomaps.
+          files: turkiye.pmtiles
+          make_latest: false
+          overwrite_files: true

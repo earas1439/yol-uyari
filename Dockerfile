@@ -10,9 +10,11 @@ RUN a2enmod headers \
  && sed -i 's/<VirtualHost \*:80>/<VirtualHost *:${PORT}>/' /etc/apache2/sites-available/000-default.conf
 
 ENV PORT=10000
-COPY index.html manifest.json icon-192.png icon-512.png /var/www/html/
+COPY index.html app.js sw.js manifest.json icon-192.png icon-512.png /var/www/html/
+COPY lib /var/www/html/lib
+COPY admin /var/www/html/admin
 COPY data /var/www/html/data
 COPY api /var/www/html/api
-RUN mkdir -p /var/www/html/api/data && chown -R www-data:www-data /var/www/html/api/data
+RUN mkdir -p /var/www/html/api/data /var/www/html/tiles && chown -R www-data:www-data /var/www/html/api/data /var/www/html/tiles
 
 EXPOSE 10000

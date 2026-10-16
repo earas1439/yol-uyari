@@ -77,6 +77,14 @@ def gradle():
         if 'create("yoluyari")' not in s:
             s = s.replace("    buildTypes {", SIGN_KTS + "    buildTypes {", 1)
         s = s.replace('signingConfigs.getByName("debug")', 'signingConfigs.getByName("yoluyari")')
+        # Bildirim eklentisi Java 8+ kütüphanelerinin desugar edilmesini ister
+        if "isCoreLibraryDesugaringEnabled" not in s:
+            if "compileOptions {" in s:
+                s = s.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true", 1)
+            else:
+                s = s.replace("    buildTypes {", "    compileOptions {\n        isCoreLibraryDesugaringEnabled = true\n    }\n\n    buildTypes {", 1)
+        if "desugar_jdk_libs" not in s:
+            s += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
         kts.write_text(s, encoding="utf-8")
         print("build.gradle.kts: minSdk 23 + sabit imza")
     elif groovy.exists():
@@ -87,6 +95,13 @@ def gradle():
             s = s.replace("    buildTypes {", SIGN_GROOVY + "    buildTypes {", 1)
         s = s.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.yoluyari")
         s = s.replace('signingConfig = signingConfigs.debug', 'signingConfig = signingConfigs.yoluyari')
+        if "coreLibraryDesugaringEnabled" not in s:
+            if "compileOptions {" in s:
+                s = s.replace("compileOptions {", "compileOptions {\n        coreLibraryDesugaringEnabled true", 1)
+            else:
+                s = s.replace("    buildTypes {", "    compileOptions {\n        coreLibraryDesugaringEnabled true\n    }\n\n    buildTypes {", 1)
+        if "desugar_jdk_libs" not in s:
+            s += "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
         groovy.write_text(s, encoding="utf-8")
         print("build.gradle: minSdk 23 + sabit imza")
     else:
